@@ -262,6 +262,21 @@ export default function Dashboard() {
   // Refresh & Sync State
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [syncBanner, setSyncBanner] = useState<string | null>(null);
+  const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
+
+  // Pagination State (Prevents clustering of articles)
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 8;
+
+  // Helper to resolve backend API base URL dynamically
+  const getApiBase = () => {
+    if (typeof window !== "undefined") {
+      if (window.location.port === "8080" || window.location.pathname.startsWith("/api")) {
+        return "";
+      }
+    }
+    return "http://127.0.0.1:8080";
+  };
 
   // Deploy & Gemini API Key Config State
   const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
@@ -274,7 +289,7 @@ export default function Dashboard() {
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
 
   const fetchGeminiStatus = () => {
-    fetch("http://127.0.0.1:8080/api/v1/config/gemini-status")
+    fetch(`${getApiBase()}/api/v1/config/gemini-status`)
       .then(res => res.json())
       .then(data => setGeminiStatus(data))
       .catch(err => console.warn("Could not fetch gemini status", err));
@@ -285,7 +300,7 @@ export default function Dashboard() {
     setValidationResult(null);
     setSaveSuccessMsg(null);
     try {
-      const res = await fetch("http://127.0.0.1:8080/api/v1/config/gemini-validate", {
+      const res = await fetch(`${getApiBase()}/api/v1/config/gemini-validate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ api_key: inputApiKey.trim() || undefined })
@@ -307,7 +322,7 @@ export default function Dashboard() {
     setIsSavingKey(true);
     setSaveSuccessMsg(null);
     try {
-      const res = await fetch("http://127.0.0.1:8080/api/v1/config/gemini-save", {
+      const res = await fetch(`${getApiBase()}/api/v1/config/gemini-save`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ api_key: inputApiKey.trim() })
@@ -326,7 +341,7 @@ export default function Dashboard() {
   };
 
   const fetchDocuments = (retryCount = 0) => {
-    fetch("http://127.0.0.1:8080/api/v1/documents/")
+    fetch(`${getApiBase()}/api/v1/documents/`)
       .then(res => res.json())
       .then(data => {
         if (data && data.items && data.items.length > 0) {
@@ -346,17 +361,19 @@ export default function Dashboard() {
   const handleRefreshFeed = async () => {
     setIsRefreshing(true);
     try {
-      const res = await fetch("http://127.0.0.1:8080/api/v1/documents/sync", {
+      const res = await fetch(`${getApiBase()}/api/v1/documents/sync`, {
         method: "POST"
       });
       const data = await res.json();
       await fetchDocuments();
+      const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      setLastSyncTime(timeStr);
       if (data.new_ingested && data.new_ingested > 0) {
-        setSyncBanner(`🎉 Ingested ${data.new_ingested} New Cyber Ruling(s): "${data.latest_title?.slice(0, 50)}..." • Total: ${data.total_documents} records in Ledger`);
+        setSyncBanner(`🎉 Ingested ${data.new_ingested} New Cyber Ruling(s): "${data.latest_title?.slice(0, 50)}..." • Total: ${data.total_documents} records in Ledger (Updated at ${timeStr})`);
       } else {
-        setSyncBanner(`Feed Synchronized • All ${data.active_sources || 8} authoritative sources monitored & up to date (Total: ${data.total_documents} records)`);
+        setSyncBanner(`Feed Synchronized at ${timeStr} • All ${data.active_sources || 8} authoritative sources monitored & up to date (Total: ${data.total_documents} records)`);
       }
-      setTimeout(() => setSyncBanner(null), 5000);
+      setTimeout(() => setSyncBanner(null), 6000);
     } catch (err) {
       console.error(err);
       fetchDocuments();
@@ -386,7 +403,7 @@ export default function Dashboard() {
     setIsTyping(true);
     
     try {
-      const res = await fetch("http://127.0.0.1:8080/api/v1/copilot/ask", {
+      const res = await fetch(`${getApiBase()}/api/v1/copilot/ask`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
@@ -408,7 +425,7 @@ export default function Dashboard() {
     if (!selectedDoc) return;
     setIsGeneratingAlert(true);
     try {
-      const res = await fetch("http://127.0.0.1:8080/api/v1/alert/generate", {
+      const res = await fetch(`${getApiBase()}/api/v1/alert/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ document_id: selectedDoc.id })
@@ -429,7 +446,7 @@ export default function Dashboard() {
     setReviewSuccessMsg(null);
 
     try {
-      const res = await fetch(`http://127.0.0.1:8080/api/v1/documents/${selectedDoc.id}/review`, {
+      const res = await fetch(`${getApiBase()}/api/v1/documents/${selectedDoc.id}/review`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -455,7 +472,7 @@ export default function Dashboard() {
     if (!selectedDoc) return;
     setIsGeneratingTask(true);
     try {
-      const res = await fetch(`http://127.0.0.1:8080/api/v1/documents/${selectedDoc.id}/generate-task`, {
+      const res = await fetch(`${getApiBase()}/api/v1/documents/${selectedDoc.id}/generate-task`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -482,12 +499,28 @@ export default function Dashboard() {
     const docDate = new Date(doc.retrieval_date || doc.created_at);
     
     // Search query
+    // Tags are stored with underscores (e.g. BANK_ACCOUNT_FREEZE) but users
+    // type with spaces. Normalize both sides so both "bank account freeze"
+    // and "BANK_ACCOUNT_FREEZE" match correctly.
     if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      const matchTitle = doc.title.toLowerCase().includes(q);
-      const matchAuth = authority.toLowerCase().includes(q);
-      const matchTags = docTags.some((t: string) => t.toLowerCase().includes(q));
-      const matchRaw = (doc.raw_text || "").toLowerCase().includes(q);
+      const q            = searchQuery.toLowerCase().trim();
+      const qUnderscored = q.replace(/\s+/g, "_");   // "bank account" → "bank_account"
+      const qSpaced      = q.replace(/_/g, " ");      // "bank_account" → "bank account"
+
+      const matchTitle = doc.title.toLowerCase().includes(q) ||
+                         doc.title.toLowerCase().includes(qSpaced);
+      const matchAuth  = authority.toLowerCase().includes(q);
+      const matchTags  = docTags.some((t: string) => {
+        const tLower   = t.toLowerCase();
+        const tSpaced  = tLower.replace(/_/g, " ");   // "bank_account_freeze" → "bank account freeze"
+        return (
+          tLower.includes(q)            ||  // exact stored form
+          tLower.includes(qUnderscored) ||  // user typed with spaces, tag has underscores
+          tSpaced.includes(q)           ||  // tag has underscores, user typed with spaces
+          tSpaced.includes(qSpaced)         // both normalised to spaces
+        );
+      });
+      const matchRaw   = (doc.raw_text || "").toLowerCase().includes(q);
       if (!matchTitle && !matchAuth && !matchTags && !matchRaw) return false;
     }
 
@@ -514,15 +547,26 @@ export default function Dashboard() {
     return true;
   });
 
+  // Reset page when filter criteria change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, filterPriority, filterAuthority, filterDate]);
+
+  // Paginated Slices
+  const totalPages = Math.ceil(filteredDocs.length / itemsPerPage) || 1;
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = Math.min(startIndex + itemsPerPage, filteredDocs.length);
+  const paginatedDocs = filteredDocs.slice(startIndex, endIndex);
+
   return (
     <div className="flex-col md:flex min-h-screen bg-slate-100 text-slate-900 font-sans relative">
       <div className="flex-1 space-y-6 p-6 md:p-8 max-w-[1600px] mx-auto w-full">
         
-        {/* Header (LexSentry Removed -> Official Project Title) */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between pb-5 border-b border-slate-200 gap-4">
-          <div>
+        {/* Header - Strictly in ONE clean horizontal line */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between pb-5 border-b border-slate-200 gap-4">
+          <div className="shrink-0">
             <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-xl bg-blue-700 flex items-center justify-center text-white shadow-md shadow-blue-700/20">
+              <div className="h-10 w-10 rounded-xl bg-blue-700 flex items-center justify-center text-white shadow-md shadow-blue-700/20 shrink-0">
                 <Scale className="h-6 w-6" />
               </div>
               <div>
@@ -536,30 +580,47 @@ export default function Dashboard() {
             </div>
           </div>
           
-          {/* Status & Actions */}
-          <div className="flex items-center gap-3 flex-wrap">
-            <div className="flex items-center gap-3 bg-white px-4 py-2 rounded-xl border border-slate-200 shadow-sm text-xs font-medium">
-              <div className="flex items-center gap-2 border-r border-slate-200 pr-3">
-                <RefreshCw className="h-3.5 w-3.5 text-blue-600 animate-spin-slow" />
-                <span className="text-slate-700 font-semibold">Monitoring SC, HC & Regulators (Excl. District Courts)</span>
+          {/* Status & Actions - Brought strictly into ONE clean horizontal line without wrapping */}
+          <div className="flex items-center gap-2.5 flex-nowrap shrink-0 overflow-x-auto pb-1 lg:pb-0">
+            {/* Live Monitoring Badge */}
+            <div className="flex items-center gap-2 bg-white px-3 py-2 rounded-xl border border-slate-200 shadow-xs text-xs font-medium shrink-0">
+              <div className="flex items-center gap-1.5 border-r border-slate-200 pr-2.5">
+                <RefreshCw className="h-3.5 w-3.5 text-blue-600 animate-spin-slow shrink-0" />
+                <span className="text-slate-700 font-bold whitespace-nowrap">SC, HC & Regulators</span>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="relative flex h-2 w-2">
+              <div className="flex items-center gap-1.5">
+                <span className="relative flex h-2 w-2 shrink-0">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                   <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
                 </span>
-                <span className="text-emerald-700 font-bold">Automation Active</span>
+                <span className="text-emerald-700 font-bold text-[11px] whitespace-nowrap">Automation Active</span>
               </div>
             </div>
+
+            {/* Refresh Feed Button */}
+            <button 
+              onClick={handleRefreshFeed} 
+              disabled={isRefreshing}
+              className={`bg-white hover:bg-slate-50 text-slate-700 border px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 shadow-xs transition-all disabled:opacity-75 active:scale-95 cursor-pointer shrink-0 ${isRefreshing ? "border-blue-400 bg-blue-50 text-blue-800 ring-2 ring-blue-100" : "border-slate-200"}`}
+              title="Click to check live authoritative sources and sync database"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 text-blue-600 ${isRefreshing ? "animate-spin text-blue-700" : ""}`} /> 
+              <span className="whitespace-nowrap">{isRefreshing ? "Checking Sources..." : "Refresh Feed"}</span>
+              {lastSyncTime && (
+                <span className="hidden sm:inline-block text-[10px] font-semibold text-slate-500 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded-md">
+                  {lastSyncTime}
+                </span>
+              )}
+            </button>
 
             {/* Gemini API Key Deploy Config Button */}
             <button 
               onClick={() => { setIsConfigModalOpen(true); fetchGeminiStatus(); setValidationResult(null); setSaveSuccessMsg(null); }}
-              className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 shadow-sm transition-all active:scale-95 cursor-pointer"
+              className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 shadow-xs transition-all active:scale-95 cursor-pointer shrink-0"
               title="Configure and Validate Gemini AI API Key for Deployment"
             >
-              <Key className="h-3.5 w-3.5 text-amber-500" />
-              <span>API Key Config</span>
+              <Key className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+              <span className="whitespace-nowrap">API Key Config</span>
               {geminiStatus?.configured ? (
                 <span className="flex items-center gap-1 text-[10px] font-extrabold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-full border border-emerald-200">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Active
@@ -569,16 +630,6 @@ export default function Dashboard() {
                   Setup Needed
                 </span>
               )}
-            </button>
-
-            <button 
-              onClick={handleRefreshFeed} 
-              disabled={isRefreshing}
-              className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 shadow-sm transition-all disabled:opacity-60 active:scale-95 cursor-pointer"
-              title="Click to check live authoritative sources and sync database"
-            >
-              <RefreshCw className={`h-3.5 w-3.5 text-blue-600 ${isRefreshing ? "animate-spin text-blue-700" : ""}`} /> 
-              {isRefreshing ? "Checking Sources..." : "Refresh Feed"}
             </button>
           </div>
         </div>
@@ -713,7 +764,9 @@ export default function Dashboard() {
               <div className="p-4 border-b border-slate-100 bg-slate-50/80 flex justify-between items-center">
                 <div>
                   <h2 className="font-bold text-base text-slate-800">Live Regulatory & Case Law Stream</h2>
-                  <p className="text-xs text-slate-500">Showing {filteredDocs.length} material cyber law developments.</p>
+                  <p className="text-xs text-slate-500">
+                    Showing <span className="font-bold text-slate-700">{filteredDocs.length === 0 ? 0 : startIndex + 1}–{endIndex}</span> of <span className="font-bold text-slate-700">{filteredDocs.length}</span> material cyber law developments (Page {currentPage} of {totalPages})
+                  </p>
                 </div>
                 
                 {/* Priority Legend */}
@@ -725,7 +778,7 @@ export default function Dashboard() {
               </div>
               
               <div className="p-5 bg-slate-50/40 flex-1 space-y-4">
-                {filteredDocs.map((doc, idx) => {
+                {paginatedDocs.map((doc, idx) => {
                   const tags = doc.classification?.tags || doc.classification?.tags_json || [];
                   const matched = getMatchedMatters(tags);
                   return (
@@ -734,7 +787,7 @@ export default function Dashboard() {
                         doc={doc}
                         tags={tags}
                         matchedMatters={matched}
-                        index={idx + 1}
+                        index={startIndex + idx + 1}
                       />
                     </div>
                   );
@@ -748,6 +801,46 @@ export default function Dashboard() {
                   </div>
                 )}
               </div>
+
+              {/* Cards Feed Pagination Bar */}
+              {filteredDocs.length > 0 && (
+                <div className="p-3 border-t border-slate-200 bg-white flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+                  <div className="text-slate-500 font-medium">
+                    Showing <span className="font-bold text-slate-800">{startIndex + 1}</span>–<span className="font-bold text-slate-800">{endIndex}</span> of <span className="font-bold text-slate-800">{filteredDocs.length}</span> developments
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                      disabled={currentPage === 1}
+                      className="px-2.5 py-1 rounded-md border border-slate-200 bg-white text-slate-700 font-bold hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                    >
+                      Previous
+                    </button>
+                    <div className="flex items-center gap-1">
+                      {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
+                        <button
+                          key={`card-p-${p}`}
+                          onClick={() => setCurrentPage(p)}
+                          className={`w-7 h-7 rounded-md font-bold text-xs transition-all ${
+                            currentPage === p
+                              ? "bg-blue-600 text-white shadow-xs"
+                              : "text-slate-600 hover:bg-slate-100 border border-slate-200 bg-white"
+                          }`}
+                        >
+                          {p}
+                        </button>
+                      ))}
+                    </div>
+                    <button
+                      onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                      disabled={currentPage === totalPages}
+                      className="px-2.5 py-1 rounded-md border border-slate-200 bg-white text-slate-700 font-bold hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Matter Matching Action Queue: 3 columns */}
@@ -821,7 +914,9 @@ export default function Dashboard() {
                 <h3 className="font-bold text-sm text-slate-800">Cyber Law Watch Agent • Audit Ledger</h3>
                 <p className="text-xs text-slate-500">Official structured table ledger recommended in Project Brief (Page 5).</p>
               </div>
-              <span className="text-xs text-slate-500 font-medium">Showing {filteredDocs.length} records</span>
+              <span className="text-xs text-slate-500 font-medium">
+                Showing <strong className="text-slate-800">{filteredDocs.length === 0 ? 0 : startIndex + 1}–{endIndex}</strong> of <strong className="text-slate-800">{filteredDocs.length}</strong> records (Page {currentPage} of {totalPages})
+              </span>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
@@ -840,7 +935,7 @@ export default function Dashboard() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-                  {filteredDocs.map((doc, idx) => {
+                  {paginatedDocs.map((doc, idx) => {
                     const tags = doc.classification?.tags || doc.classification?.tags_json || [];
                     const matched = getMatchedMatters(tags);
                     const isReviewed = doc.status === "REVIEWED";
@@ -852,7 +947,7 @@ export default function Dashboard() {
                       <tr key={`tbl-${doc.id}`} className="hover:bg-blue-50/50 transition-colors">
                         {/* Serial Number */}
                         <td className="p-3 pl-4 text-center font-bold text-slate-400">
-                          {idx + 1}
+                          {startIndex + idx + 1}
                         </td>
 
                         {/* Title & Citation */}
@@ -861,11 +956,11 @@ export default function Dashboard() {
                           <div className="flex items-center gap-2 mt-0.5">
                             <span className="text-[10px] text-slate-400 font-normal truncate">{doc.content_hash}</span>
                             <a 
-                              href={doc.original_url} 
+                              href={`${getApiBase()}/api/v1/documents/${doc.id}/pdf`} 
                               target="_blank" 
                               rel="noreferrer" 
                               className="text-[10px] font-bold text-blue-600 hover:underline flex items-center gap-0.5 bg-blue-50 px-1.5 py-0.2 rounded"
-                              title="Open exact PDF in new tab"
+                              title="Open authentic certified PDF in new tab"
                             >
                               <FileText className="h-2.5 w-2.5" /> PDF
                             </a>
@@ -1002,6 +1097,46 @@ export default function Dashboard() {
                 </tbody>
               </table>
             </div>
+
+            {/* Audit Table Pagination Bar */}
+            {filteredDocs.length > 0 && (
+              <div className="p-3 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+                <div className="text-slate-500 font-medium">
+                  Showing <span className="font-bold text-slate-800">{startIndex + 1}</span>–<span className="font-bold text-slate-800">{endIndex}</span> of <span className="font-bold text-slate-800">{filteredDocs.length}</span> records
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
+                    className="px-2.5 py-1 rounded-md border border-slate-200 bg-white text-slate-700 font-bold hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                  >
+                    Previous
+                  </button>
+                  <div className="flex items-center gap-1">
+                    {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
+                      <button
+                        key={`tbl-p-${p}`}
+                        onClick={() => setCurrentPage(p)}
+                        className={`w-7 h-7 rounded-md font-bold text-xs transition-all ${
+                          currentPage === p
+                            ? "bg-blue-600 text-white shadow-xs"
+                            : "text-slate-600 hover:bg-slate-100 border border-slate-200 bg-white"
+                        }`}
+                      >
+                        {p}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                    disabled={currentPage === totalPages}
+                    className="px-2.5 py-1 rounded-md border border-slate-200 bg-white text-slate-700 font-bold hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -1188,11 +1323,11 @@ export default function Dashboard() {
                         {msg.citations.map((cit, cidx) => (
                           <a 
                             key={cidx} 
-                            href={cit.original_url} 
+                            href={cit.document_id ? `${getApiBase()}/api/v1/documents/${cit.document_id}/pdf` : cit.original_url} 
                             target="_blank" 
                             rel="noreferrer" 
                             className="text-[11px] bg-white border border-blue-200 hover:border-blue-500 hover:bg-blue-50 p-2 rounded-lg flex items-center justify-between gap-2 text-slate-800 font-semibold group transition shadow-2xs"
-                            title={`Open official certified copy: ${cit.original_url}`}
+                            title={`Open official certified PDF copy: ${cit.title}`}
                           >
                             <div className="flex items-center gap-2 truncate">
                               <span className="bg-blue-600 text-white text-[10px] px-1.5 py-0.5 rounded font-black shrink-0">[{cidx + 1}]</span>
@@ -1299,7 +1434,7 @@ export default function Dashboard() {
                   
                   {/* Exact Quoted Certified Official PDF */}
                   <a 
-                    href={selectedDoc.original_url} 
+                    href={`${getApiBase()}/api/v1/documents/${selectedDoc.id}/pdf`} 
                     target="_blank" 
                     rel="noreferrer" 
                     className="bg-blue-600 text-white hover:bg-blue-700 px-3 py-1 rounded-lg font-bold flex items-center gap-1.5 transition-all shadow-xs group"
@@ -1360,7 +1495,7 @@ export default function Dashboard() {
                     </div>
                     <div className="flex items-center gap-2">
                       <a 
-                        href={selectedDoc.original_url} 
+                        href={`${getApiBase()}/api/v1/documents/${selectedDoc.id}/pdf`} 
                         target="_blank" 
                         rel="noreferrer" 
                         className="hidden sm:flex items-center gap-1.5 text-[11px] font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-2.5 py-1 rounded-md transition-colors"
@@ -1394,7 +1529,7 @@ export default function Dashboard() {
                           <code className="bg-white px-2 py-0.5 rounded border border-blue-200 text-blue-800 font-mono text-[11px] truncate">{selectedDoc.original_url}</code>
                         </div>
                         <a 
-                          href={selectedDoc.original_url} 
+                          href={`${getApiBase()}/api/v1/documents/${selectedDoc.id}/pdf`} 
                           download 
                           className="text-blue-700 hover:text-blue-900 font-bold text-[11px] underline shrink-0 ml-2"
                         >
@@ -1419,7 +1554,7 @@ export default function Dashboard() {
                     <div className="flex-1 relative overflow-hidden">
                       {viewMode === "pdf" ? (
                          <iframe 
-                           src={selectedDoc.original_url} 
+                           src={`${getApiBase()}/api/v1/documents/${selectedDoc.id}/pdf`} 
                            className="w-full h-full border-0 absolute inset-0 bg-white"
                            title="Official Legal Document"
                          />

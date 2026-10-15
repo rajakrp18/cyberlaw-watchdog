@@ -1,9 +1,13 @@
 import asyncio
 import logging
+import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 from app.api.v1 import api_router
 from app.config import settings
@@ -14,8 +18,22 @@ logger = logging.getLogger(__name__)
 
 from app.pipeline.ingest import run_ingestion_cycle
 
+# ─── Resolve frontend static files path ──────────────────────────────────────
+# When running as a PyInstaller exe, files are extracted to sys._MEIPASS.
+# In development, they live in the normal project tree.
+if getattr(sys, 'frozen', False):
+    # Running inside a PyInstaller exe
+    _base = Path(sys._MEIPASS)
+else:
+    # Running normally (dev mode)
+    _base = Path(__file__).resolve().parent.parent.parent  # backend/app/main.py -> project root
+
+FRONTEND_OUT = _base / "frontend" / "out"
+logger.info(f"Frontend static path: {FRONTEND_OUT} (exists={FRONTEND_OUT.exists()})")
+
 async def run_scrapers_loop():
     """Background task loop that acts as the Automation Engine."""
+    await asyncio.sleep(30)  # Let server start and serve requests first
     while True:
         logger.info("Triggering Automation Engine (Phase 4)...")
         try:
@@ -61,3 +79,14 @@ app.include_router(api_router, prefix="/api/v1")
 @app.get("/health")
 def health_check():
     return {"status": "ok", "app": settings.app_name}
+
+# ─── Serve Next.js static export ─────────────────────────────────────────────
+# Mount AFTER API routes so /api/v1/* takes priority
+if FRONTEND_OUT.exists():
+    app.mount("/", StaticFiles(directory=str(FRONTEND_OUT), html=True), name="frontend")
+    logger.info("Frontend static files mounted at /")
+else:
+    # Catch-all fallback when no frontend is built yet
+    @app.get("/{full_path:path}")
+    def frontend_fallback(full_path: str):
+        return {"message": "Frontend not built. Run: cd frontend && npm run build"}

@@ -75,8 +75,7 @@ class BaseRegulatoryScraper(ABC):
 
     source_name: str = "UnknownSource"
     base_url: str = ""
-    min_request_delay: float = 2.0  # seconds between requests
-    max_retries: int = 3
+    check_robots: bool = True
 
     def __init__(self) -> None:
         self._rate_limiter = RateLimiter(self.min_request_delay)
@@ -87,12 +86,13 @@ class BaseRegulatoryScraper(ABC):
         self._client = httpx.AsyncClient(
             timeout=30.0,
             headers={
-                "User-Agent": "LexSentry/0.1 (Legal Intelligence Agent; contact@yourfirm.com)",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             },
             follow_redirects=True,
         )
-        await self._load_robots()
+        if self.check_robots:
+            await self._load_robots()
         return self
 
     async def __aexit__(self, *args: Any) -> None:
@@ -101,7 +101,7 @@ class BaseRegulatoryScraper(ABC):
 
     async def _load_robots(self) -> None:
         """Load and parse robots.txt for the base URL."""
-        if not self.base_url:
+        if not self.base_url or not self.check_robots:
             return
         robots_url = urljoin(self.base_url, "/robots.txt")
         try:
@@ -117,7 +117,7 @@ class BaseRegulatoryScraper(ABC):
 
     def _is_allowed(self, url: str) -> bool:
         """Check if the URL is allowed by robots.txt."""
-        if self._robots is None:
+        if not self.check_robots or self._robots is None:
             return True
         return self._robots.can_fetch("LexSentry", url)
 
@@ -129,7 +129,7 @@ class BaseRegulatoryScraper(ABC):
     )
     async def _fetch(self, url: str, **kwargs: Any) -> httpx.Response:
         """Rate-limited, retrying HTTP GET."""
-        if not self._is_allowed(url):
+        if self.check_robots and not self._is_allowed(url):
             raise PermissionError(f"Blocked by robots.txt: {url}")
         await self._rate_limiter.acquire()
         assert self._client is not None

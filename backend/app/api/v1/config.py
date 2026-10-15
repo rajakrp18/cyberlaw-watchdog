@@ -3,6 +3,7 @@ import re
 import time
 import logging
 from typing import Optional
+import sys
 from pathlib import Path
 from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException
@@ -13,7 +14,10 @@ from app.config import settings
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-ENV_PATH = Path(__file__).resolve().parent.parent.parent.parent / ".env"
+if getattr(sys, 'frozen', False):
+    ENV_PATH = Path(sys.executable).resolve().parent / ".env"
+else:
+    ENV_PATH = Path(__file__).resolve().parent.parent.parent.parent / ".env"
 
 class KeyValidationRequest(BaseModel):
     api_key: Optional[str] = None

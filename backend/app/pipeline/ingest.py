@@ -9,6 +9,8 @@ from app.database import AsyncSessionLocal
 from app.models import Document, Source, DocumentStatus, DocumentType
 from app.scrapers.rbi import RBIScraper
 from app.scrapers.supreme_court import SupremeCourtScraper
+from app.scrapers.indian_kanoon import IndianKanoonScraper
+from app.scrapers.legal_news_rss import LegalNewsRSSScraper
 from app.pipeline.workflow import agent_pipeline
 from app.pipeline.state import PipelineState
 
@@ -20,7 +22,7 @@ async def get_or_create_source(session, name: str, source_type: str) -> str:
     source = result.scalars().first()
     if not source:
         source = Source(
-            id=uuid.uuid4().hex,
+            id=uuid.uuid4(),
             name=name,
             url="https://example.com",
             authority_level=1,
@@ -40,24 +42,27 @@ async def run_ingestion_cycle():
     3. Pushes new documents through the AI pipeline (LangGraph).
     4. Saves the results to the database.
     """
-    logger.info("🚀 [AUTOMATION ENGINE] Starting ingestion cycle...")
-    
-    # Initialize scrapers
+    logger.info("[AUTOMATION ENGINE] Starting ingestion cycle...")
+
+    # Initialize all scrapers — ordered from most to least reliable
     scrapers = [
-        RBIScraper(),
-        SupremeCourtScraper()
+        LegalNewsRSSScraper(),    # RSS feeds — most reliable, no bot blocking
+        IndianKanoonScraper(),    # Public legal DB — good accessibility
+        RBIScraper(),             # RBI RSS — may fail due to SSL issues
+        SupremeCourtScraper(),    # SCI website — may fail due to bot blocking
     ]
-    
+
     scraped_docs = []
     for scraper in scrapers:
         try:
-            logger.info(f"📡 Running {scraper.source_name} scraper...")
+            logger.info(f"[AUTOMATION ENGINE] Running: {scraper.source_name}")
             docs = await scraper.run()
+            logger.info(f"[AUTOMATION ENGINE] {scraper.source_name}: found {len(docs)} relevant docs")
             scraped_docs.extend(docs)
         except Exception as e:
-            logger.error(f"❌ Scraper {scraper.source_name} failed: {e}")
+            logger.error(f"[AUTOMATION ENGINE] Scraper '{scraper.source_name}' crashed: {e}", exc_info=True)
 
-    logger.info(f"✅ Found {len(scraped_docs)} total documents across all sources.")
+    logger.info(f"[AUTOMATION ENGINE] Total scraped across all sources: {len(scraped_docs)} docs")
     
     # Process and save new documents
     async with AsyncSessionLocal() as session:
@@ -74,7 +79,7 @@ async def run_ingestion_cycle():
             
             # Step 1: Save Raw Document to Database
             new_doc = Document(
-                id=uuid.uuid4().hex,
+                id=uuid.uuid4(),
                 source_id=source_id,
                 title=doc_data.title,
                 original_url=doc_data.original_url,
