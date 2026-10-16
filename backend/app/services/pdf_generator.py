@@ -226,13 +226,20 @@ def generate_certified_document_pdf(doc: Any) -> bytes:
             story.append(Paragraph(f"<b>Caution & Procedural Caveats:</b> {_clean_text_for_pdf(imp.caution)}", body_style))
         story.append(Spacer(1, 6))
 
+    if not HAS_REPORTLAB:
+        return _generate_fallback_pdf(doc)
+
     # 5. Verbatim Official Judgment / Circular Text
     raw_text = getattr(doc, "raw_text", "") or ""
     if raw_text:
         story.append(Paragraph("VERBATIM CERTIFIED PROCEEDINGS & OPERATIVE ORDERS", section_heading_style))
-        # Format transcript lines
-        cleaned_transcript = _clean_text_for_pdf(raw_text)
-        story.append(Paragraph(cleaned_transcript, transcript_style))
+        # Split text into separate paragraphs to enable clean ReportLab page-breaking
+        paragraphs = [p.strip() for p in raw_text.split("\n") if p.strip()]
+        for para in paragraphs:
+            cleaned_p = _clean_text_for_pdf(para)
+            if cleaned_p:
+                story.append(Paragraph(cleaned_p, transcript_style))
+        story.append(Spacer(1, 8))
 
     # 6. Official Seal & Registry Verification Notice
     story.append(Spacer(1, 14))
@@ -244,5 +251,8 @@ def generate_certified_document_pdf(doc: Any) -> bytes:
     )
     story.append(Paragraph(notice_text, ParagraphStyle("CertNotice", fontName="Helvetica", fontSize=7.5, leading=9.5, textColor=colors.HexColor("#64748b"), alignment=1)))
 
-    doc_template.build(story)
-    return buffer.getvalue()
+    try:
+        doc_template.build(story)
+        return buffer.getvalue()
+    except Exception:
+        return _generate_fallback_pdf(doc)

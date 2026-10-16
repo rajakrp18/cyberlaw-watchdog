@@ -35,7 +35,8 @@ import {
   Sparkles,
   Key,
   Eye,
-  EyeOff
+  EyeOff,
+  Globe
 } from "lucide-react";
 import ReactMarkdown from 'react-markdown';
 
@@ -90,8 +91,8 @@ const ACTIVE_MATTERS = [
 const AUTHORITY_PORTALS: Record<string, { portalName: string, portalUrl: string, citationName: string, tier: "SC" | "HC" | "REGULATOR" }> = {
   "High Court of Karnataka": {
     portalName: "High Court of Karnataka Official Portal",
-    portalUrl: "https://karnatakahiqhicourt.kar.nic.in",
-    citationName: "karnatakahiqhicourt.kar.nic.in",
+    portalUrl: "https://karnatakahiighcourt.kar.nic.in",
+    citationName: "karnatakahiighcourt.kar.nic.in",
     tier: "HC"
   },
   "High Court of Delhi": {
@@ -134,6 +135,12 @@ const AUTHORITY_PORTALS: Record<string, { portalName: string, portalUrl: string,
     portalName: "High Court for the State of Telangana Official Portal",
     portalUrl: "https://tshc.gov.in",
     citationName: "tshc.gov.in",
+    tier: "HC"
+  },
+  "High Court of Allahabad": {
+    portalName: "Allahabad High Court Official Portal",
+    portalUrl: "https://allahabadhighcourt.in",
+    citationName: "allahabadhighcourt.in",
     tier: "HC"
   }
 };
@@ -552,6 +559,18 @@ export default function Dashboard() {
     setCurrentPage(1);
   }, [searchQuery, filterPriority, filterAuthority, filterDate]);
 
+  // Lock background window scroll when any modal is open
+  useEffect(() => {
+    if (selectedDoc || isConfigModalOpen || generatedAlert) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [selectedDoc, isConfigModalOpen, generatedAlert]);
+
   // Paginated Slices
   const totalPages = Math.ceil(filteredDocs.length / itemsPerPage) || 1;
   const startIndex = (currentPage - 1) * itemsPerPage;
@@ -953,17 +972,28 @@ export default function Dashboard() {
                         {/* Title & Citation */}
                         <td className="p-3 font-bold text-slate-900 max-w-[280px]">
                           <div className="truncate" title={doc.title}>{doc.title}</div>
-                          <div className="flex items-center gap-2 mt-0.5">
+                          <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                             <span className="text-[10px] text-slate-400 font-normal truncate">{doc.content_hash}</span>
                             <a 
                               href={`${getApiBase()}/api/v1/documents/${doc.id}/pdf`} 
                               target="_blank" 
                               rel="noreferrer" 
-                              className="text-[10px] font-bold text-blue-600 hover:underline flex items-center gap-0.5 bg-blue-50 px-1.5 py-0.2 rounded"
+                              className="text-[10px] font-bold text-blue-600 hover:underline flex items-center gap-0.5 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200"
                               title="Open authentic certified PDF in new tab"
                             >
                               <FileText className="h-2.5 w-2.5" /> PDF
                             </a>
+                            {doc.original_url && doc.original_url.startsWith("http") && (
+                              <a 
+                                href={doc.original_url} 
+                                target="_blank" 
+                                rel="noreferrer" 
+                                className="text-[10px] font-bold text-emerald-700 hover:underline flex items-center gap-0.5 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200"
+                                title={`Direct Source Order: ${doc.original_url}`}
+                              >
+                                <Globe className="h-2.5 w-2.5 text-emerald-600" /> Source ↗
+                              </a>
+                            )}
                           </div>
                         </td>
 
@@ -1412,12 +1442,12 @@ export default function Dashboard() {
 
       {/* Comprehensive Interactive Review Modal */}
       {selectedDoc && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-sm p-2 md:p-6">
-          <div className="bg-white w-full max-w-[1450px] h-[96vh] overflow-hidden flex flex-col rounded-2xl shadow-2xl ring-1 ring-black/10 animate-in fade-in zoom-in-95 duration-200">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-sm p-2 sm:p-4 md:p-6 overflow-y-auto">
+          <div className="bg-white w-full max-w-[1400px] max-h-[94vh] flex flex-col rounded-2xl shadow-2xl ring-1 ring-black/10 animate-in fade-in zoom-in-95 duration-200 overflow-hidden my-auto">
             
             {/* Modal Header */}
-            <div className="p-5 border-b border-slate-200 flex justify-between items-start bg-slate-50">
-              <div className="space-y-1 pr-6">
+            <div className="p-4 sm:p-5 border-b border-slate-200 flex justify-between items-start bg-slate-50 shrink-0 gap-3">
+              <div className="space-y-1.5 pr-2 min-w-0 flex-1">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-[11px] font-black uppercase tracking-wider px-2 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200">
                     {selectedDoc.document_type || "LEGAL DOCUMENT"}
@@ -1427,23 +1457,38 @@ export default function Dashboard() {
                   </span>
                   <span className="text-xs text-slate-500 font-semibold">• {selectedDoc.authority}</span>
                 </div>
-                <h2 className="text-xl md:text-2xl font-black text-slate-900 leading-snug">{selectedDoc.title}</h2>
-                <div className="flex items-center gap-3 text-xs font-medium text-slate-500 pt-1.5 flex-wrap">
-                  <span>Order / Retrieval Date: {new Date(selectedDoc.retrieval_date || selectedDoc.created_at).toLocaleDateString('en-IN')}</span>
-                  <span>•</span>
+                <h2 className="text-lg sm:text-xl md:text-2xl font-black text-slate-900 leading-snug break-words">{selectedDoc.title}</h2>
+                <div className="flex items-center gap-2 sm:gap-3 text-xs font-medium text-slate-500 pt-1 flex-wrap">
+                  <span className="whitespace-nowrap">Order / Retrieval Date: {new Date(selectedDoc.retrieval_date || selectedDoc.created_at).toLocaleDateString('en-IN')}</span>
+                  <span className="hidden sm:inline">•</span>
                   
                   {/* Exact Quoted Certified Official PDF */}
                   <a 
                     href={`${getApiBase()}/api/v1/documents/${selectedDoc.id}/pdf`} 
                     target="_blank" 
                     rel="noreferrer" 
-                    className="bg-blue-600 text-white hover:bg-blue-700 px-3 py-1 rounded-lg font-bold flex items-center gap-1.5 transition-all shadow-xs group"
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded-lg font-bold flex items-center gap-1.5 transition-all shadow-xs group"
                     title="Open authentic certified PDF in full separate tab"
                   >
                     <FileText className="h-3.5 w-3.5 text-white" />
                     <span>Exact Official PDF</span> 
                     <ArrowUpRight className="h-3.5 w-3.5 text-blue-200 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
                   </a>
+
+                  {/* Direct Web Source / Live Portal Link */}
+                  {selectedDoc.original_url && selectedDoc.original_url.startsWith("http") && (
+                    <a 
+                      href={selectedDoc.original_url} 
+                      target="_blank" 
+                      rel="noreferrer" 
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1 rounded-lg font-bold flex items-center gap-1.5 transition-all shadow-xs group"
+                      title={`Open direct official source docket/order: ${selectedDoc.original_url}`}
+                    >
+                      <Globe className="h-3.5 w-3.5 text-white" />
+                      <span>Direct Source Order</span>
+                      <ArrowUpRight className="h-3.5 w-3.5 text-emerald-200 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
+                    </a>
+                  )}
 
                   {/* Official Court Registry / Departmental Verification Link (Strict SC / HC) */}
                   <a 
@@ -1483,27 +1528,27 @@ export default function Dashboard() {
             </div>
             
             {/* Modal Body */}
-            <div className="flex-1 overflow-hidden p-6 bg-slate-100/60">
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 h-full">
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-100/60 min-h-0">
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 min-w-0">
                 
                 {/* Left Column: Official Source Document & PDF Viewer */}
-                <div className="flex flex-col h-full bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-                  <div className="p-3 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
-                    <div className="flex items-center gap-2 px-2">
-                      <FileText className="h-4 w-4 text-blue-600" />
-                      <h3 className="text-sm font-bold text-slate-800">Source Evidence Viewer</h3>
+                <div className="flex flex-col bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden min-w-0 h-[560px] xl:h-[720px]">
+                  <div className="p-3 border-b border-slate-200 bg-slate-50 flex flex-wrap justify-between items-center gap-2 shrink-0">
+                    <div className="flex items-center gap-2 px-1">
+                      <FileText className="h-4 w-4 text-blue-600 shrink-0" />
+                      <h3 className="text-sm font-bold text-slate-800 whitespace-nowrap">Source Evidence Viewer</h3>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <a 
                         href={`${getApiBase()}/api/v1/documents/${selectedDoc.id}/pdf`} 
                         target="_blank" 
                         rel="noreferrer" 
-                        className="hidden sm:flex items-center gap-1.5 text-[11px] font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-2.5 py-1 rounded-md transition-colors"
+                        className="flex items-center gap-1.5 text-[11px] font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-2.5 py-1 rounded-md transition-colors whitespace-nowrap"
                         title="Open exact certified PDF in separate tab"
                       >
                         <FileText className="h-3 w-3 text-blue-600" /> Open PDF in New Tab ↗
                       </a>
-                      <div className="flex bg-slate-200 rounded-lg p-0.5 text-xs">
+                      <div className="flex bg-slate-200 rounded-lg p-0.5 text-xs shrink-0">
                         <button 
                           onClick={() => setViewMode("pdf")}
                           className={`px-3 py-1 font-bold rounded-md transition-all ${viewMode === "pdf" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"}`}
@@ -1520,38 +1565,60 @@ export default function Dashboard() {
                     </div>
                   </div>
 
-                  <div className="flex-1 overflow-hidden bg-slate-100 relative flex flex-col">
+                  <div className="flex-1 overflow-hidden bg-slate-100 relative flex flex-col min-h-0">
                     {viewMode === "pdf" && (
-                      <div className="bg-blue-50/90 border-b border-blue-200 px-3 py-1.5 flex items-center justify-between text-xs text-blue-950 font-medium shrink-0">
-                        <div className="flex items-center gap-2 truncate">
+                      <div className="bg-blue-50/90 border-b border-blue-200 px-3 py-1.5 flex items-center justify-between text-xs text-blue-950 font-medium shrink-0 flex-wrap gap-2">
+                        <div className="flex items-center gap-2 truncate min-w-0">
                           <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0"></span>
-                          <span className="font-bold text-[11px]">Quoted Certified Source PDF:</span>
-                          <code className="bg-white px-2 py-0.5 rounded border border-blue-200 text-blue-800 font-mono text-[11px] truncate">{selectedDoc.original_url}</code>
+                          <span className="font-bold text-[11px] shrink-0">Certified Source:</span>
+                          <a 
+                            href={selectedDoc.original_url.startsWith("http") ? selectedDoc.original_url : `${getApiBase()}/api/v1/documents/${selectedDoc.id}/pdf`}
+                            target="_blank" 
+                            rel="noreferrer"
+                            className="bg-white px-2 py-0.5 rounded border border-blue-200 text-blue-800 font-mono text-[11px] truncate hover:underline flex items-center gap-1"
+                            title={`Open direct source link: ${selectedDoc.original_url}`}
+                          >
+                            <span>{selectedDoc.original_url}</span>
+                            <ArrowUpRight className="h-3 w-3 shrink-0" />
+                          </a>
                         </div>
                         <a 
                           href={`${getApiBase()}/api/v1/documents/${selectedDoc.id}/pdf`} 
                           download 
-                          className="text-blue-700 hover:text-blue-900 font-bold text-[11px] underline shrink-0 ml-2"
+                          className="text-blue-700 hover:text-blue-900 font-bold text-[11px] underline shrink-0 ml-auto"
                         >
                           Download PDF
                         </a>
                       </div>
                     )}
                     {viewMode === "text" && (
-                      <div className="bg-slate-100 border-b border-slate-200 px-3 py-1.5 flex items-center justify-between text-xs text-slate-700 font-medium shrink-0">
-                        <span className="text-[11px] font-bold text-slate-600">Verbatim Certified Transcript • {selectedDoc.raw_text?.length || 0} characters</span>
+                      <div className="bg-slate-100 border-b border-slate-200 px-3 py-1.5 flex items-center justify-between text-xs text-slate-700 font-medium shrink-0 flex-wrap gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="text-[11px] font-bold text-slate-600 shrink-0">Verbatim Certified Transcript • {selectedDoc.raw_text?.length || 0} chars</span>
+                          {selectedDoc.original_url && selectedDoc.original_url.startsWith("http") && (
+                            <a 
+                              href={selectedDoc.original_url} 
+                              target="_blank" 
+                              rel="noreferrer" 
+                              className="text-[10px] font-bold text-emerald-700 hover:underline flex items-center gap-0.5 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded"
+                              title="Direct Source Link"
+                            >
+                              <Globe className="h-2.5 w-2.5" /> Source Link ↗
+                            </a>
+                          )}
+                        </div>
                         <button 
                           onClick={() => {
                             navigator.clipboard.writeText(selectedDoc.raw_text || "");
                             alert("Full extracted judgment text copied to clipboard!");
                           }}
-                          className="text-blue-700 hover:text-blue-900 font-bold text-[11px] flex items-center gap-1 bg-white border border-slate-300 px-2 py-0.5 rounded shadow-2xs"
+                          className="text-blue-700 hover:text-blue-900 font-bold text-[11px] flex items-center gap-1 bg-white border border-slate-300 px-2 py-0.5 rounded shadow-2xs shrink-0 ml-auto"
                         >
                           <Copy className="h-3 w-3" /> Copy Extracted Text
                         </button>
                       </div>
                     )}
-                    <div className="flex-1 relative overflow-hidden">
+                    <div className="flex-1 relative overflow-hidden min-h-0">
                       {viewMode === "pdf" ? (
                          <iframe 
                            src={`${getApiBase()}/api/v1/documents/${selectedDoc.id}/pdf`} 
@@ -1559,7 +1626,7 @@ export default function Dashboard() {
                            title="Official Legal Document"
                          />
                       ) : (
-                        <div className="p-6 text-xs text-slate-800 font-mono leading-relaxed whitespace-pre-wrap h-full overflow-y-auto bg-slate-50 select-text">
+                        <div className="p-4 sm:p-6 text-xs text-slate-800 font-mono leading-relaxed whitespace-pre-wrap h-full overflow-y-auto bg-slate-50 select-text">
                           {selectedDoc.raw_text || "No text could be extracted."}
                         </div>
                       )}
@@ -1567,16 +1634,16 @@ export default function Dashboard() {
                   </div>
 
                   {/* Document Footer Verification */}
-                  <div className="p-2.5 bg-slate-50 border-t border-slate-200 text-[11px] text-slate-500 flex justify-between items-center px-4">
-                    <span>Document Hash: <code className="bg-slate-200 px-1 py-0.5 rounded text-[10px]">{selectedDoc.content_hash}</code></span>
-                    <span className="text-emerald-700 font-bold flex items-center gap-1">
+                  <div className="p-2.5 bg-slate-50 border-t border-slate-200 text-[11px] text-slate-500 flex justify-between items-center px-4 shrink-0 flex-wrap gap-2">
+                    <span className="truncate min-w-0">Document Hash: <code className="bg-slate-200 px-1 py-0.5 rounded text-[10px]">{selectedDoc.content_hash}</code></span>
+                    <span className="text-emerald-700 font-bold flex items-center gap-1 shrink-0">
                       <ShieldCheck className="h-3.5 w-3.5" /> Immutable Verification Record
                     </span>
                   </div>
                 </div>
                 
                 {/* Right Column: Complete AI Impact Analysis + Matter Matching + Action Workflow */}
-                <div className="flex flex-col h-full space-y-5 overflow-y-auto pr-1 pb-6">
+                <div className="flex flex-col space-y-5 min-w-0">
                   
                   {/* AI Structured Impact Analysis */}
                   <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
@@ -1789,7 +1856,7 @@ export default function Dashboard() {
                         />
                       </div>
 
-                      <div className="grid grid-cols-2 gap-3 pt-1">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
                         <button 
                           type="submit"
                           disabled={isSubmittingReview}

@@ -3,6 +3,7 @@ import datetime
 import logging
 from pathlib import Path
 import re
+import sys
 import uuid
 from typing import Any, List
 
@@ -21,7 +22,7 @@ from app.models import (
 )
 from app.schemas import DocumentResponse, DocumentListResponse, ReviewCreate, ReviewResponse
 from app.scrapers.legal_news_rss import LegalNewsRSSScraper
-from app.services.pdf_generator import generate_certified_document_pdf
+from app.services.pdf_generator import generate_certified_document_pdf, _generate_fallback_pdf
 
 logger = logging.getLogger(__name__)
 
@@ -675,19 +676,25 @@ async def get_document(id: uuid.UUID, db: AsyncSession = Depends(get_db)) -> Any
 
 
 @router.get("/{id}/pdf")
-async def get_document_pdf(id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+async def get_document_pdf(id: str, db: AsyncSession = Depends(get_db)):
     """
     Returns the certified PDF document.
     1. If a local pre-rendered PDF exists for this document (e.g. in frontend/public/docs), serves it.
     2. Otherwise, dynamically generates an authoritative, certified court/regulatory PDF on the fly using ReportLab!
     """
+    try:
+        clean_id = id.strip()
+        parsed_id = uuid.UUID(clean_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid document ID format")
+
     result = await db.execute(
         select(Document)
         .options(
             selectinload(Document.classification),
             selectinload(Document.impact_note),
         )
-        .where(Document.id == id)
+        .where(Document.id == parsed_id)
     )
     doc = result.scalar_one_or_none()
     if not doc:
@@ -695,7 +702,7 @@ async def get_document_pdf(id: uuid.UUID, db: AsyncSession = Depends(get_db)):
 
     # Check if local pre-generated file exists
     if getattr(sys, 'frozen', False):
-        base_dir = Path(sys._MEIPASS)
+        base_dir = Path(getattr(sys, '_MEIPASS', Path(".")))
         candidate_dirs = [base_dir / "frontend" / "out" / "docs"]
     else:
         base_dir = Path(__file__).resolve().parent.parent.parent.parent
@@ -721,8 +728,13 @@ async def get_document_pdf(id: uuid.UUID, db: AsyncSession = Depends(get_db)):
             )
 
     # Dynamically generate certified PDF
-    pdf_bytes = generate_certified_document_pdf(doc)
-    safe_name = re.sub(r'[^a-zA-Z0-9_\-]', '_', doc.title[:35]) + ".pdf"
+    try:
+        pdf_bytes = generate_certified_document_pdf(doc)
+    except Exception as exc:
+        logger.warning(f"Certified PDF generation failed for {doc.id} ({exc}), using fallback")
+        pdf_bytes = _generate_fallback_pdf(doc)
+
+    safe_name = re.sub(r'[^a-zA-Z0-9_\-]', '_', (doc.title or "Document")[:35]) + ".pdf"
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
